@@ -275,7 +275,7 @@ if (formContact) {
       v('message') || '(pas de message)',
     ].filter((l) => l !== null).join('\n');
 
-    location.href = `mailto:contact@kizuni.ch?subject=${encodeURIComponent(v('sujet') || 'Demande depuis le site')}&body=${encodeURIComponent(corps)}`;
+    location.href = `mailto:info@kizuni.ch?subject=${encodeURIComponent(v('sujet') || 'Demande depuis le site')}&body=${encodeURIComponent(corps)}`;
   });
 }
 
