@@ -260,7 +260,7 @@ async function envoyerDemande(form) {
       data.append(key, String(value));
     }
     if (form.matches('[data-prevoyance-lead-form]')) {
-      data.set('message', `Demande de bilan prévoyance. Capacité d’épargne mensuelle : ${data.get('capacite_epargne')} CHF.`);
+      data.set('message', `Demande de bilan prévoyance. Projet : ${data.get('projet_prevoyance')}. Date de naissance : ${data.get('date_naissance')}. Capacité d’épargne mensuelle : ${data.get('capacite_epargne')} CHF.`);
     }
     if (form.matches('[data-contact-form]')) {
       const sujet = data.get('sujet');
@@ -276,6 +276,15 @@ async function envoyerDemande(form) {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     if (status) status.textContent = 'Merci, votre demande a bien été envoyée. Kizuni Finance vous recontactera.';
     form.reset();
+    if (form.matches('[data-prevoyance-lead-form]')) {
+      const qualification = form.querySelector('[data-prevoyance-step="qualification"]');
+      const coordonnees = form.querySelector('[data-prevoyance-step="coordonnees"]');
+      if (qualification && coordonnees) {
+        coordonnees.hidden = true;
+        qualification.hidden = false;
+        coordonnees.querySelectorAll('input').forEach((input) => { input.disabled = true; });
+      }
+    }
   } catch (error) {
     if (status) status.textContent = 'Votre demande n’a pas pu être envoyée. Réessayez plus tard ou écrivez à info@kizuni.ch.';
   } finally {
@@ -287,6 +296,36 @@ document.querySelectorAll('[data-contact-form], [data-prevoyance-lead-form]').fo
   form.addEventListener('submit', (event) => {
     event.preventDefault();
     envoyerDemande(form);
+  });
+});
+
+document.querySelectorAll('[data-prevoyance-lead-form]').forEach((form) => {
+  const qualification = form.querySelector('[data-prevoyance-step="qualification"]');
+  const coordonnees = form.querySelector('[data-prevoyance-step="coordonnees"]');
+  const continuer = form.querySelector('[data-prevoyance-continue]');
+  const retour = form.querySelector('[data-prevoyance-back]');
+  if (!qualification || !coordonnees || !continuer || !retour) return;
+
+  continuer.addEventListener('click', () => {
+    const choixProjet = Array.from(form.elements.namedItem('projet_prevoyance') ?? []);
+    const projet = choixProjet.find((radio) => radio.checked);
+    const date = form.elements.date_naissance;
+    if (!projet) {
+      choixProjet[0]?.reportValidity();
+      return;
+    }
+    if (!date.reportValidity()) return;
+    qualification.hidden = true;
+    coordonnees.hidden = false;
+    coordonnees.querySelectorAll('input').forEach((input) => { input.disabled = false; });
+    coordonnees.querySelector('input')?.focus();
+  });
+
+  retour.addEventListener('click', () => {
+    coordonnees.hidden = true;
+    qualification.hidden = false;
+    coordonnees.querySelectorAll('input').forEach((input) => { input.disabled = true; });
+    continuer.focus();
   });
 });
 
