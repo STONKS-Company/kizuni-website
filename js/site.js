@@ -279,6 +279,40 @@ function calculerProjectionPrevoyance(form) {
 // L'origine du site identifie le client côté Meetwave; source distingue les
 // formulaires contact et prévoyance dans le suivi.
 const endpointLeads = 'https://db-meetwave.stonks.ch/functions/v1/form-submit';
+let turnstileScriptPromise;
+function chargerTurnstile(form) {
+  const widget = form?.querySelector('[data-turnstile-widget]');
+  if (!widget || widget.dataset.widgetId) return;
+  const afficher = () => {
+    if (!window.turnstile || widget.dataset.widgetId) return;
+    const champJeton = form.elements.turnstile_token;
+    widget.dataset.widgetId = window.turnstile.render(widget, {
+      sitekey: widget.dataset.sitekey,
+      callback: (jeton) => { if (champJeton) champJeton.value = jeton; },
+      'expired-callback': () => { if (champJeton) champJeton.value = ''; },
+      'error-callback': () => { if (champJeton) champJeton.value = ''; },
+    });
+  };
+  if (window.turnstile) return afficher();
+  if (!turnstileScriptPromise) {
+    turnstileScriptPromise = new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+      script.async = true;
+      script.defer = true;
+      script.onload = resolve;
+      script.onerror = reject;
+      document.head.append(script);
+    });
+  }
+  turnstileScriptPromise.then(afficher).catch(() => {});
+}
+function reinitialiserTurnstile(form) {
+  const widget = form?.querySelector('[data-turnstile-widget]');
+  const champJeton = form?.elements.turnstile_token;
+  if (champJeton) champJeton.value = '';
+  if (widget?.dataset.widgetId && window.turnstile) window.turnstile.reset(widget.dataset.widgetId);
+}
 async function envoyerDemande(form) {
   const status = Array.from(form.querySelectorAll('[data-form-status]')).find((item) => !item.closest('[hidden]')) || form.querySelector('[data-form-status]');
   const bouton = form.querySelector('[type="submit"]');
@@ -313,12 +347,16 @@ async function envoyerDemande(form) {
       data.set('message', 'Demande : ' + sujet + '\n\n' + message);
     }
     data.set('source', form.dataset.source || 'kizuni-site');
+    const jetonTurnstile = form.elements.turnstile_token?.value;
+    if (!jetonTurnstile) throw new Error('TURNSTILE_REQUIRED');
+    data.set('turnstile_token', jetonTurnstile);
     const response = await fetch(endpointLeads, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
       body: data.toString(),
     });
     if (!response.ok) throw new Error('HTTP ' + response.status);
+    reinitialiserTurnstile(form);
     if (form.matches('[data-prevoyance-lead-form]')) {
       const questionnaire = form.querySelector('[data-prevoyance-step="questionnaire"]');
       const coordonnees = form.querySelector('[data-prevoyance-step="coordonnees"]');
@@ -338,10 +376,13 @@ async function envoyerDemande(form) {
   } catch (error) {
     if (status) {
       const apercuLocal = ['localhost', '127.0.0.1'].includes(window.location.hostname);
-      status.textContent = apercuLocal
+      status.textContent = error.message === 'TURNSTILE_REQUIRED'
+        ? 'Veuillez terminer la vérification avant d’envoyer votre demande.'
+        : apercuLocal
         ? 'Cet aperçu local ne transmet pas de demandes réelles. Pour envoyer votre demande à Kizuni, utilisez kizuni.ch.'
         : 'Votre demande n’a pas pu être envoyée. Réessayez plus tard ou écrivez à info@kizuni.ch.';
     }
+    reinitialiserTurnstile(form);
   } finally {
     if (bouton && bouton.textContent !== 'Projection affichée') bouton.disabled = false;
   }
@@ -352,6 +393,7 @@ document.querySelectorAll('[data-contact-form], [data-prevoyance-lead-form]').fo
     event.preventDefault();
     envoyerDemande(form);
   });
+  if (form.matches('[data-contact-form]')) chargerTurnstile(form);
 });
 
 document.querySelectorAll('[data-prevoyance-lead-form]').forEach((form) => {
@@ -430,6 +472,7 @@ document.querySelectorAll('[data-prevoyance-lead-form]').forEach((form) => {
     questionnaire.hidden = true;
     coordonnees.hidden = false;
     coordonnees.querySelectorAll('input').forEach((input) => { input.disabled = false; });
+    chargerTurnstile(form);
     coordonnees.querySelector('input:not([name="website"])')?.focus();
   });
 
