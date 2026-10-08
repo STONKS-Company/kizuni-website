@@ -243,6 +243,38 @@ document.querySelectorAll('[data-offre]').forEach((dlg) => {
   dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); });
 });
 
+function calculerProjectionPrevoyance(form) {
+  const naissance = new Date(form.elements.date_naissance.value + 'T00:00:00');
+  const aujourdHui = new Date();
+  let ageActuel = aujourdHui.getFullYear() - naissance.getFullYear();
+  if (
+    aujourdHui.getMonth() < naissance.getMonth()
+    || (aujourdHui.getMonth() === naissance.getMonth() && aujourdHui.getDate() < naissance.getDate())
+  ) ageActuel -= 1;
+
+  const mensualite = Number(form.elements.capacite_epargne.value);
+  const valeurs = {};
+  for (const rendement of [2, 5, 10]) {
+    valeurs[rendement] = Prevoyance.projection3ePilier({
+      ageActuel,
+      ageRetraite: 65,
+      versementAnnuel: mensualite * 12,
+      rendementAnnuel: rendement / 100,
+    }).capitalFinal;
+    const sortie = form.querySelector('[data-projection="' + rendement + '"]');
+    if (sortie) sortie.textContent = montant(valeurs[rendement]);
+  }
+
+  const duree = Math.max(0, 65 - ageActuel);
+  const resume = form.querySelector('[data-projection-resume]');
+  if (resume) {
+    resume.textContent = 'Avec ' + montant(mensualite) + ' par mois pendant ' + duree
+      + (duree > 1 ? ' ans' : ' an') + ', les versements cumulés représenteraient '
+      + montant(mensualite * 12 * duree) + ', avant rendement.';
+  }
+  return { ageActuel, mensualite, valeurs };
+}
+
 // ---- Envoi des demandes via Meetwave ------------------------------------
 // L'origine du site identifie le client côté Meetwave; source distingue les
 // formulaires contact et prévoyance dans le suivi.
@@ -260,27 +292,25 @@ async function envoyerDemande(form) {
       data.append(key, String(value));
     }
     if (form.matches('[data-prevoyance-lead-form]')) {
-      const objectifs = data.getAll('objectifs_prevoyance').join(', ');
-      const projection = Array.from(form.querySelectorAll('[data-projection]'))
-        .map((card) => `${card.dataset.projection}% : ${card.textContent.trim()}`)
+      calculerProjectionPrevoyance(form);
+      const ligne = (titre, valeur) => titre + ' : ' + (valeur || '—');
+      const projection = [2, 5, 10]
+        .map((taux) => taux + ' % : ' + form.querySelector('[data-projection="' + taux + '"]').textContent)
         .join(' | ');
       data.set('message', [
         'Simulation prévoyance Kizuni (site kizuni.ch)',
-        `3e pilier existant : ${data.get('a_deja_3a')}`,
-        `Genre : ${data.get('genre')}`,
-        `Situation professionnelle : ${data.get('statut_professionnel')}`,
-        `Capacité d’épargne mensuelle : ${data.get('capacite_epargne')} CHF`,
-        `Objectifs : ${objectifs}`,
-        `Année de naissance : ${data.get('annee_naissance')}`,
-        `Lieu de résidence : ${data.get('lieu_residence')}`,
-        `Profil de risque : ${data.get('profil_risque')}`,
-        `Projections indicatives : ${projection}`,
+        ligne('Projet', data.get('projet_prevoyance')),
+        ligne('Date de naissance', data.get('date_naissance')),
+        ligne('Statut professionnel', data.get('statut_professionnel')),
+        ligne('Revenu brut annuel', data.get('revenu_brut_annuel')),
+        ligne('Capacité d’épargne mensuelle', data.get('capacite_epargne') + ' CHF'),
+        ligne('Projections indicatives', projection),
       ].join('\n'));
     }
     if (form.matches('[data-contact-form]')) {
       const sujet = data.get('sujet');
       const message = data.get('message');
-      data.set('message', `Demande : ${sujet}\n\n${message}`);
+      data.set('message', 'Demande : ' + sujet + '\n\n' + message);
     }
     data.set('source', form.dataset.source || 'kizuni-site');
     const response = await fetch(endpointLeads, {
@@ -288,19 +318,32 @@ async function envoyerDemande(form) {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
       body: data.toString(),
     });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    if (status) status.textContent = 'Merci, votre demande a bien été envoyée. Kizuni Finance vous recontactera.';
+    if (!response.ok) throw new Error('HTTP ' + response.status);
     if (form.matches('[data-prevoyance-lead-form]')) {
-      if (bouton) bouton.textContent = 'Demande envoyée';
+      const questionnaire = form.querySelector('[data-prevoyance-step="questionnaire"]');
+      const coordonnees = form.querySelector('[data-prevoyance-step="coordonnees"]');
+      const resultats = form.querySelector('[data-prevoyance-step="resultats"]');
+      if (questionnaire) questionnaire.hidden = true;
+      if (coordonnees) coordonnees.hidden = true;
+      if (resultats) resultats.hidden = false;
+      const succes = form.querySelector('[data-prevoyance-success]');
+      if (succes) succes.textContent = 'Merci, votre demande a bien été transmise. Voici votre projection indicative.';
+      if (bouton) bouton.textContent = 'Projection affichée';
       if (bouton) bouton.disabled = true;
+      resultats?.querySelector('[data-prevoyance-success]')?.focus();
     } else {
+      if (status) status.textContent = 'Merci, votre demande a bien été envoyée. Kizuni Finance vous recontactera.';
       form.reset();
     }
-
   } catch (error) {
-    if (status) status.textContent = 'Votre demande n’a pas pu être envoyée. Réessayez plus tard ou écrivez à info@kizuni.ch.';
+    if (status) {
+      const apercuLocal = ['localhost', '127.0.0.1'].includes(window.location.hostname);
+      status.textContent = apercuLocal
+        ? 'Cet aperçu local ne transmet pas de demandes réelles. Pour envoyer votre demande à Kizuni, utilisez kizuni.ch.'
+        : 'Votre demande n’a pas pu être envoyée. Réessayez plus tard ou écrivez à info@kizuni.ch.';
+    }
   } finally {
-    if (bouton && bouton.textContent !== 'Demande envoyée') bouton.disabled = false;
+    if (bouton && bouton.textContent !== 'Projection affichée') bouton.disabled = false;
   }
 }
 
@@ -313,106 +356,68 @@ document.querySelectorAll('[data-contact-form], [data-prevoyance-lead-form]').fo
 
 document.querySelectorAll('[data-prevoyance-lead-form]').forEach((form) => {
   const questionnaire = form.querySelector('[data-prevoyance-step="questionnaire"]');
-  const resultats = form.querySelector('[data-prevoyance-step="resultats"]');
   const coordonnees = form.querySelector('[data-prevoyance-step="coordonnees"]');
-  const simuler = form.querySelector('[data-prevoyance-simuler]');
-  const demanderConseil = form.querySelector('[data-prevoyance-demander-conseil]');
+  const resultats = form.querySelector('[data-prevoyance-step="resultats"]');
   const boutonSuivant = form.querySelector('[data-question-next]');
   const boutonPrecedent = form.querySelector('[data-question-back]');
-  const indicateurEtape = form.querySelector('[data-question-progress]');
-  const boutonsRetour = form.querySelectorAll('[data-prevoyance-back]');
-  const pagesQuestionnaire = Array.from(questionnaire?.querySelectorAll('[data-question-page]') ?? []);
-  if (!questionnaire || !resultats || !coordonnees || !simuler || !demanderConseil || pagesQuestionnaire.length !== 8) return;
+  const capacite = form.elements.capacite_epargne;
+  const sortieCapacite = form.querySelector('[data-capacite-epargne]');
+  if (!questionnaire || !coordonnees || !resultats || !boutonSuivant || !boutonPrecedent) return;
 
-  const objectifs = form.querySelectorAll('[name="objectifs_prevoyance"]');
-  const pageObjectifs = form.querySelector('[name="objectifs_prevoyance"]')?.closest('[data-question-page]');
-  const erreurObjectifs = form.querySelector('[data-objectifs-error]');
-  let indexEtape = 0;
-  const afficherEtapeQuestion = (index) => {
-    indexEtape = index;
-    pagesQuestionnaire.forEach((page, position) => {
-      page.hidden = position !== index;
-      page.querySelectorAll('input').forEach((input) => { input.disabled = position > index; });
-    });
-    const derniereEtape = index === pagesQuestionnaire.length - 1;
-    if (boutonPrecedent) boutonPrecedent.hidden = index === 0;
-    if (boutonSuivant) boutonSuivant.hidden = derniereEtape;
-    simuler.hidden = !derniereEtape;
-    if (indicateurEtape) indicateurEtape.textContent = `Étape ${index + 1} sur ${pagesQuestionnaire.length}`;
-  };
-  const afficherEtape = (etape) => {
-    questionnaire.hidden = etape !== 'questionnaire';
-    resultats.hidden = etape !== 'resultats';
-    coordonnees.hidden = etape !== 'coordonnees';
-    coordonnees.querySelectorAll('input').forEach((input) => { input.disabled = etape !== 'coordonnees'; });
-  };
-  const validerEtape = () => {
-    const page = pagesQuestionnaire[indexEtape];
-    if (page === pageObjectifs) {
-      const objectifChoisi = Array.from(objectifs).some((input) => input.checked);
-      if (erreurObjectifs) erreurObjectifs.hidden = objectifChoisi;
-      if (!objectifChoisi) {
-        objectifs[0]?.focus();
-        return false;
+  const naissance = form.elements.date_naissance;
+  const anneeNaissance = form.querySelector('[data-naissance-annee]');
+  const moisNaissance = form.querySelector('[data-naissance-mois]');
+  const jourNaissance = form.querySelector('[data-naissance-jour]');
+  if (naissance && anneeNaissance && moisNaissance && jourNaissance) {
+    const anneeActuelle = new Date().getFullYear();
+    const mois = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];
+    for (let annee = anneeActuelle - 18; annee >= anneeActuelle - 100; annee -= 1) {
+      anneeNaissance.add(new Option(String(annee), String(annee)));
+    }
+    mois.forEach((nom, index) => moisNaissance.add(new Option(nom, String(index + 1).padStart(2, '0'))));
+
+    const rafraichirJours = () => {
+      const jourPrecedent = jourNaissance.value;
+      jourNaissance.replaceChildren(new Option('Jour', ''));
+      const annee = Number(anneeNaissance.value);
+      const moisNumero = Number(moisNaissance.value);
+      if (!annee || !moisNumero) return;
+      const nombreJours = new Date(annee, moisNumero, 0).getDate();
+      for (let jour = 1; jour <= nombreJours; jour += 1) {
+        const valeur = String(jour).padStart(2, '0');
+        jourNaissance.add(new Option(valeur, valeur));
       }
-    }
-    const champInvalide = Array.from(page.querySelectorAll('input')).find((input) => !input.checkValidity());
-    if (champInvalide) {
-      champInvalide.reportValidity();
-      return false;
-    }
-    return true;
+      if (jourPrecedent && Number(jourPrecedent) <= nombreJours) jourNaissance.value = jourPrecedent;
+    };
+    const synchroniserDate = () => {
+      naissance.value = anneeNaissance.value && moisNaissance.value && jourNaissance.value
+        ? anneeNaissance.value + '-' + moisNaissance.value + '-' + jourNaissance.value
+        : '';
+    };
+    anneeNaissance.addEventListener('change', () => { rafraichirJours(); synchroniserDate(); });
+    moisNaissance.addEventListener('change', () => { rafraichirJours(); synchroniserDate(); });
+    jourNaissance.addEventListener('change', synchroniserDate);
+  }
+  const afficherCapacite = () => {
+    if (sortieCapacite && capacite) sortieCapacite.textContent = montant(Number(capacite.value));
   };
+  capacite?.addEventListener('input', afficherCapacite);
+  afficherCapacite();
 
-  afficherEtapeQuestion(0);
-  boutonSuivant?.addEventListener('click', () => {
-    if (!validerEtape()) return;
-    afficherEtapeQuestion(Math.min(indexEtape + 1, pagesQuestionnaire.length - 1));
-    pagesQuestionnaire[indexEtape].querySelector('input')?.focus();
-  });
-  boutonPrecedent?.addEventListener('click', () => {
-    if (indexEtape > 0) afficherEtapeQuestion(indexEtape - 1);
-    pagesQuestionnaire[indexEtape].querySelector('input')?.focus();
-  });
-
-  simuler.addEventListener('click', () => {
-    if (!validerEtape()) return;
-    const ageActuel = new Date().getFullYear() - Number(form.elements.annee_naissance.value);
-    const mensualite = Number(form.elements.capacite_epargne.value);
-    const projeter = (rendement) => Prevoyance.projection3ePilier({
-      ageActuel,
-      ageRetraite: 65,
-      versementAnnuel: mensualite * 12,
-      rendementAnnuel: rendement / 100,
-    });
-    for (const rendement of [2, 5, 10]) {
-      const valeur = projeter(rendement).capitalFinal;
-      const sortie = form.querySelector(`[data-projection="${rendement}"]`);
-      if (sortie) sortie.textContent = montant(valeur);
-    }
-    const duree = Math.max(0, 65 - ageActuel);
-    const resume = form.querySelector('[data-projection-resume]');
-    if (resume) resume.textContent = `Avec ${montant(mensualite)} par mois pendant ${duree} ${duree > 1 ? 'ans' : 'an'}, les versements cumulés représenteraient ${montant(mensualite * 12 * duree)}, avant rendement.`;
-    afficherEtape('resultats');
-    resultats.querySelector('[data-prevoyance-demander-conseil]')?.focus();
+  boutonSuivant.addEventListener('click', () => {
+    if (!form.reportValidity()) return;
+    questionnaire.hidden = true;
+    coordonnees.hidden = false;
+    coordonnees.querySelectorAll('input').forEach((input) => { input.disabled = false; });
+    coordonnees.querySelector('input:not([name="website"])')?.focus();
   });
 
-  demanderConseil.addEventListener('click', () => {
-    afficherEtape('coordonnees');
-    coordonnees.querySelector('input:not([disabled])')?.focus();
+  boutonPrecedent.addEventListener('click', () => {
+    coordonnees.hidden = true;
+    coordonnees.querySelectorAll('input').forEach((input) => { input.disabled = true; });
+    questionnaire.hidden = false;
+    boutonSuivant.focus();
   });
-
-  boutonsRetour.forEach((bouton) => bouton.addEventListener('click', () => {
-    const retourDepuisCoordonnees = !coordonnees.hidden;
-    afficherEtape(retourDepuisCoordonnees ? 'resultats' : 'questionnaire');
-    if (retourDepuisCoordonnees) {
-      afficherEtapeQuestion(pagesQuestionnaire.length - 1);
-      demanderConseil.focus();
-    } else {
-      afficherEtapeQuestion(0);
-      simuler.focus();
-    }
-  }));
 });
 // ---- Préremplissage du sujet sur la page contact ------------------------
 const formContact = document.querySelector('[data-contact-form]');
