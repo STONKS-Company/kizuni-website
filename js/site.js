@@ -248,7 +248,7 @@ document.querySelectorAll('[data-offre]').forEach((dlg) => {
 // formulaires contact et prévoyance dans le suivi.
 const endpointLeads = 'https://db-meetwave.stonks.ch/functions/v1/form-submit';
 async function envoyerDemande(form) {
-  const status = form.querySelector('[data-form-status]');
+  const status = Array.from(form.querySelectorAll('[data-form-status]')).find((item) => !item.closest('[hidden]')) || form.querySelector('[data-form-status]');
   const bouton = form.querySelector('[type="submit"]');
   if (form.elements.website?.value) return;
   if (status) status.textContent = 'Envoi en cours…';
@@ -260,7 +260,22 @@ async function envoyerDemande(form) {
       data.append(key, String(value));
     }
     if (form.matches('[data-prevoyance-lead-form]')) {
-      data.set('message', `Demande de bilan prévoyance. Projet : ${data.get('projet_prevoyance')}. Date de naissance : ${data.get('date_naissance')}. Capacité d’épargne mensuelle : ${data.get('capacite_epargne')} CHF.`);
+      const objectifs = data.getAll('objectifs_prevoyance').join(', ');
+      const projection = Array.from(form.querySelectorAll('[data-projection]'))
+        .map((card) => `${card.dataset.projection}% : ${card.textContent.trim()}`)
+        .join(' | ');
+      data.set('message', [
+        'Simulation prévoyance Kizuni (site kizuni.ch)',
+        `3e pilier existant : ${data.get('a_deja_3a')}`,
+        `Genre : ${data.get('genre')}`,
+        `Situation professionnelle : ${data.get('statut_professionnel')}`,
+        `Capacité d’épargne mensuelle : ${data.get('capacite_epargne')} CHF`,
+        `Objectifs : ${objectifs}`,
+        `Année de naissance : ${data.get('annee_naissance')}`,
+        `Lieu de résidence : ${data.get('lieu_residence')}`,
+        `Profil de risque : ${data.get('profil_risque')}`,
+        `Projections indicatives : ${projection}`,
+      ].join('\n'));
     }
     if (form.matches('[data-contact-form]')) {
       const sujet = data.get('sujet');
@@ -275,20 +290,17 @@ async function envoyerDemande(form) {
     });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     if (status) status.textContent = 'Merci, votre demande a bien été envoyée. Kizuni Finance vous recontactera.';
-    form.reset();
     if (form.matches('[data-prevoyance-lead-form]')) {
-      const qualification = form.querySelector('[data-prevoyance-step="qualification"]');
-      const coordonnees = form.querySelector('[data-prevoyance-step="coordonnees"]');
-      if (qualification && coordonnees) {
-        coordonnees.hidden = true;
-        qualification.hidden = false;
-        coordonnees.querySelectorAll('input').forEach((input) => { input.disabled = true; });
-      }
+      if (bouton) bouton.textContent = 'Demande envoyée';
+      if (bouton) bouton.disabled = true;
+    } else {
+      form.reset();
     }
+
   } catch (error) {
     if (status) status.textContent = 'Votre demande n’a pas pu être envoyée. Réessayez plus tard ou écrivez à info@kizuni.ch.';
   } finally {
-    if (bouton) bouton.disabled = false;
+    if (bouton && bouton.textContent !== 'Demande envoyée') bouton.disabled = false;
   }
 }
 
@@ -300,35 +312,108 @@ document.querySelectorAll('[data-contact-form], [data-prevoyance-lead-form]').fo
 });
 
 document.querySelectorAll('[data-prevoyance-lead-form]').forEach((form) => {
-  const qualification = form.querySelector('[data-prevoyance-step="qualification"]');
+  const questionnaire = form.querySelector('[data-prevoyance-step="questionnaire"]');
+  const resultats = form.querySelector('[data-prevoyance-step="resultats"]');
   const coordonnees = form.querySelector('[data-prevoyance-step="coordonnees"]');
-  const continuer = form.querySelector('[data-prevoyance-continue]');
-  const retour = form.querySelector('[data-prevoyance-back]');
-  if (!qualification || !coordonnees || !continuer || !retour) return;
+  const simuler = form.querySelector('[data-prevoyance-simuler]');
+  const demanderConseil = form.querySelector('[data-prevoyance-demander-conseil]');
+  const boutonSuivant = form.querySelector('[data-question-next]');
+  const boutonPrecedent = form.querySelector('[data-question-back]');
+  const indicateurEtape = form.querySelector('[data-question-progress]');
+  const boutonsRetour = form.querySelectorAll('[data-prevoyance-back]');
+  const pagesQuestionnaire = Array.from(questionnaire?.querySelectorAll('[data-question-page]') ?? []);
+  if (!questionnaire || !resultats || !coordonnees || !simuler || !demanderConseil || pagesQuestionnaire.length !== 8) return;
 
-  continuer.addEventListener('click', () => {
-    const choixProjet = Array.from(form.elements.namedItem('projet_prevoyance') ?? []);
-    const projet = choixProjet.find((radio) => radio.checked);
-    const date = form.elements.date_naissance;
-    if (!projet) {
-      choixProjet[0]?.reportValidity();
-      return;
+  const objectifs = form.querySelectorAll('[name="objectifs_prevoyance"]');
+  const pageObjectifs = form.querySelector('[name="objectifs_prevoyance"]')?.closest('[data-question-page]');
+  const erreurObjectifs = form.querySelector('[data-objectifs-error]');
+  let indexEtape = 0;
+  const afficherEtapeQuestion = (index) => {
+    indexEtape = index;
+    pagesQuestionnaire.forEach((page, position) => {
+      page.hidden = position !== index;
+      page.querySelectorAll('input').forEach((input) => { input.disabled = position > index; });
+    });
+    const derniereEtape = index === pagesQuestionnaire.length - 1;
+    if (boutonPrecedent) boutonPrecedent.hidden = index === 0;
+    if (boutonSuivant) boutonSuivant.hidden = derniereEtape;
+    simuler.hidden = !derniereEtape;
+    if (indicateurEtape) indicateurEtape.textContent = `Étape ${index + 1} sur ${pagesQuestionnaire.length}`;
+  };
+  const afficherEtape = (etape) => {
+    questionnaire.hidden = etape !== 'questionnaire';
+    resultats.hidden = etape !== 'resultats';
+    coordonnees.hidden = etape !== 'coordonnees';
+    coordonnees.querySelectorAll('input').forEach((input) => { input.disabled = etape !== 'coordonnees'; });
+  };
+  const validerEtape = () => {
+    const page = pagesQuestionnaire[indexEtape];
+    if (page === pageObjectifs) {
+      const objectifChoisi = Array.from(objectifs).some((input) => input.checked);
+      if (erreurObjectifs) erreurObjectifs.hidden = objectifChoisi;
+      if (!objectifChoisi) {
+        objectifs[0]?.focus();
+        return false;
+      }
     }
-    if (!date.reportValidity()) return;
-    qualification.hidden = true;
-    coordonnees.hidden = false;
-    coordonnees.querySelectorAll('input').forEach((input) => { input.disabled = false; });
-    coordonnees.querySelector('input')?.focus();
+    const champInvalide = Array.from(page.querySelectorAll('input')).find((input) => !input.checkValidity());
+    if (champInvalide) {
+      champInvalide.reportValidity();
+      return false;
+    }
+    return true;
+  };
+
+  afficherEtapeQuestion(0);
+  boutonSuivant?.addEventListener('click', () => {
+    if (!validerEtape()) return;
+    afficherEtapeQuestion(Math.min(indexEtape + 1, pagesQuestionnaire.length - 1));
+    pagesQuestionnaire[indexEtape].querySelector('input')?.focus();
+  });
+  boutonPrecedent?.addEventListener('click', () => {
+    if (indexEtape > 0) afficherEtapeQuestion(indexEtape - 1);
+    pagesQuestionnaire[indexEtape].querySelector('input')?.focus();
   });
 
-  retour.addEventListener('click', () => {
-    coordonnees.hidden = true;
-    qualification.hidden = false;
-    coordonnees.querySelectorAll('input').forEach((input) => { input.disabled = true; });
-    continuer.focus();
+  simuler.addEventListener('click', () => {
+    if (!validerEtape()) return;
+    const ageActuel = new Date().getFullYear() - Number(form.elements.annee_naissance.value);
+    const mensualite = Number(form.elements.capacite_epargne.value);
+    const projeter = (rendement) => Prevoyance.projection3ePilier({
+      ageActuel,
+      ageRetraite: 65,
+      versementAnnuel: mensualite * 12,
+      rendementAnnuel: rendement / 100,
+    });
+    for (const rendement of [2, 5, 10]) {
+      const valeur = projeter(rendement).capitalFinal;
+      const sortie = form.querySelector(`[data-projection="${rendement}"]`);
+      if (sortie) sortie.textContent = montant(valeur);
+    }
+    const duree = Math.max(0, 65 - ageActuel);
+    const resume = form.querySelector('[data-projection-resume]');
+    if (resume) resume.textContent = `Avec ${montant(mensualite)} par mois pendant ${duree} ${duree > 1 ? 'ans' : 'an'}, les versements cumulés représenteraient ${montant(mensualite * 12 * duree)}, avant rendement.`;
+    afficherEtape('resultats');
+    resultats.querySelector('[data-prevoyance-demander-conseil]')?.focus();
   });
+
+  demanderConseil.addEventListener('click', () => {
+    afficherEtape('coordonnees');
+    coordonnees.querySelector('input:not([disabled])')?.focus();
+  });
+
+  boutonsRetour.forEach((bouton) => bouton.addEventListener('click', () => {
+    const retourDepuisCoordonnees = !coordonnees.hidden;
+    afficherEtape(retourDepuisCoordonnees ? 'resultats' : 'questionnaire');
+    if (retourDepuisCoordonnees) {
+      afficherEtapeQuestion(pagesQuestionnaire.length - 1);
+      demanderConseil.focus();
+    } else {
+      afficherEtapeQuestion(0);
+      simuler.focus();
+    }
+  }));
 });
-
 // ---- Préremplissage du sujet sur la page contact ------------------------
 const formContact = document.querySelector('[data-contact-form]');
 if (formContact) {
