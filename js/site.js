@@ -115,7 +115,7 @@ function ouvrirEstimation(form, r) {
 
   mettre('prix', montant(r.propertyPrice));
   mettre('fondsPropres', montant(r.totalEquity));
-  mettre('fondsCash', montant(r.cashEquity));
+  mettre('fondsCash', montant(r.cashOutsidePillar));
   mettre('hypotheque', montant(r.mortgage));
   mettre('interets', montant(r.annualInterest));
   mettre('entretien', montant(r.annualMaintenance));
@@ -243,14 +243,65 @@ document.querySelectorAll('[data-offre]').forEach((dlg) => {
   dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); });
 });
 
-// ---- Page contact -------------------------------------------------------
-// Le sujet arrive dans l'URL (?sujet=...), pose par le bouton d'ou l'on vient.
-// A l'envoi on compose un mailto pre-rempli : aucun serveur, donc rien qui
-// puisse echouer silencieusement tant que le formulaire n'est pas branche.
+// ---- Envoi des demandes via Meetwave ------------------------------------
+// L'origine du site identifie le client côté Meetwave; source distingue les
+// formulaires contact et prévoyance dans le suivi.
+const endpointLeads = 'https://db-meetwave.stonks.ch/functions/v1/form-submit';
+async function envoyerDemande(form) {
+  const status = form.querySelector('[data-form-status]');
+  const bouton = form.querySelector('[type="submit"]');
+  if (form.elements.website?.value) return;
+  if (status) status.textContent = 'Envoi en cours…';
+  if (bouton) bouton.disabled = true;
+  try {
+    const data = new URLSearchParams();
+    for (const [key, value] of new FormData(form)) {
+      if (key === 'website') continue;
+      data.append(key, String(value));
+    }
+    if (form.matches('[data-prevoyance-lead-form]')) {
+      data.set('message', `Demande de bilan prévoyance. Capacité d’épargne mensuelle : ${data.get('capacite_epargne')} CHF.`);
+    }
+    if (form.matches('[data-contact-form]')) {
+      const sujet = data.get('sujet');
+      const message = data.get('message');
+      data.set('message', `Demande : ${sujet}\n\n${message}`);
+    }
+    data.set('source', form.dataset.source || 'kizuni-site');
+    const response = await fetch(endpointLeads, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+      body: data.toString(),
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    if (status) status.textContent = 'Merci, votre demande a bien été envoyée. Kizuni Finance vous recontactera.';
+    form.reset();
+  } catch (error) {
+    if (status) status.textContent = 'Votre demande n’a pas pu être envoyée. Réessayez plus tard ou écrivez à info@kizuni.ch.';
+  } finally {
+    if (bouton) bouton.disabled = false;
+  }
+}
+
+document.querySelectorAll('[data-contact-form], [data-prevoyance-lead-form]').forEach((form) => {
+  form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    envoyerDemande(form);
+  });
+});
+
+// ---- Préremplissage du sujet sur la page contact ------------------------
 const formContact = document.querySelector('[data-contact-form]');
 if (formContact) {
   const params = new URLSearchParams(location.search);
-  const sujetVoulu = params.get('sujet');
+  const sujetDemande = params.get('sujet');
+  const aliasSujets = {
+    'Devenir propriétaire': 'Immobilier',
+    'Mon estimation hypothécaire': 'Immobilier',
+    'Prévoyance et protection': 'Prévoyance',
+    Candidature: 'Autres assurances',
+  };
+  const sujetVoulu = aliasSujets[sujetDemande] || sujetDemande;
   const poste = params.get('poste');
   const select = formContact.querySelector('[name="sujet"]');
 
@@ -263,20 +314,6 @@ if (formContact) {
     if (zone && !zone.value) zone.value = `Bonjour,\n\nJe souhaite postuler au poste : ${poste}.\n\n`;
   }
 
-  formContact.addEventListener('submit', (e) => {
-    e.preventDefault();
-    const d = new FormData(formContact);
-    const v = (k) => String(d.get(k) || '').trim();
-    const corps = [
-      `Nom : ${v('prenom')} ${v('nom')}`.trim(),
-      `E-mail : ${v('email')}`,
-      v('telephone') ? `Téléphone : ${v('telephone')}` : null,
-      '',
-      v('message') || '(pas de message)',
-    ].filter((l) => l !== null).join('\n');
-
-    location.href = `mailto:info@kizuni.ch?subject=${encodeURIComponent(v('sujet') || 'Demande depuis le site')}&body=${encodeURIComponent(corps)}`;
-  });
 }
 
 window.KizuniSite = { ready: true, calculateMortgage };
@@ -338,6 +375,8 @@ function calculerPilier3(form) {
     ageRetraite: valeurNombre(form, 'ageRetraite'),
     versementAnnuel: valeurNombre(form, 'versementAnnuel'),
     capitalInitial: valeurNombre(form, 'capitalInitial'),
+    // Le select expose un pourcentage (2, 5 ou 10), la projection attend une
+    // fraction (0.02, 0.05 ou 0.10).
     rendementAnnuel: valeurNombre(form, 'rendement') / 100,
   });
 
@@ -481,6 +520,7 @@ document.querySelectorAll('[data-pilier3-form]').forEach((form) => {
     }
   };
   form.addEventListener('input', relier);
+  form.addEventListener('change', relier);
   form.addEventListener('submit', (evenement) => {
     evenement.preventDefault();
     relier();

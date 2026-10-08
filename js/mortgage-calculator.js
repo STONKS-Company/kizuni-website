@@ -26,6 +26,9 @@ function calculateMortgage(input) {
   const totalEquity = cashEquity + pensionEquity;
   const mortgage = Math.max(0, propertyPrice - totalEquity);
   const equityRatio = totalEquity / propertyPrice;
+  // Le chiffre présenté comme « hors 2e pilier » est la moitié des fonds
+  // propres totaux apportés. Le contrôle d'éligibilité garde le cash réel.
+  const cashOutsidePillar = totalEquity / 2;
   const cashRatio = cashEquity / propertyPrice;
   const secondMortgage = Math.max(0, mortgage - propertyPrice * FIRST_MORTGAGE_RATIO);
   const annualInterest = mortgage * THEORETICAL_INTEREST_RATE;
@@ -40,6 +43,7 @@ function calculateMortgage(input) {
   return {
     propertyPrice,
     cashEquity,
+    cashOutsidePillar,
     pensionEquity,
     totalEquity,
     mortgage,
