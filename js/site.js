@@ -364,6 +364,27 @@ document.querySelectorAll('[data-prevoyance-lead-form]').forEach((form) => {
   const sortieCapacite = form.querySelector('[data-capacite-epargne]');
   if (!questionnaire || !coordonnees || !resultats || !boutonSuivant || !boutonPrecedent) return;
 
+  const projets = [...document.querySelectorAll('[name="projet_prevoyance"][form="prevoyance-lead-form"]')];
+  const imageProjet = document.querySelector('[data-prevoyance-project-image]');
+  const legendeProjet = document.querySelector('[data-prevoyance-project-caption]');
+  const actualiserVisuelProjet = (projet) => {
+    if (!projet || !imageProjet || !legendeProjet) return;
+    legendeProjet.textContent = projet.dataset.visualCaption || '';
+    legendeProjet.hidden = !legendeProjet.textContent;
+    imageProjet.alt = projet.dataset.visualAlt || '';
+    const nouvelleSource = projet.dataset.visualSrc;
+    if (!nouvelleSource || imageProjet.getAttribute('src') === nouvelleSource) return;
+    imageProjet.classList.add('opacity-40');
+    const imagePrechargee = new Image();
+    imagePrechargee.onload = () => {
+      imageProjet.src = nouvelleSource;
+      imageProjet.classList.remove('opacity-40');
+    };
+    imagePrechargee.onerror = () => imageProjet.classList.remove('opacity-40');
+    imagePrechargee.src = nouvelleSource;
+  };
+  projets.forEach((projet) => projet.addEventListener('change', () => actualiserVisuelProjet(projet)));
+
   const naissance = form.elements.date_naissance;
   const anneeNaissance = form.querySelector('[data-naissance-annee]');
   const moisNaissance = form.querySelector('[data-naissance-mois]');
