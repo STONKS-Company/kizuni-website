@@ -275,8 +275,8 @@ function calculerProjectionPrevoyance(form) {
   return { ageActuel, mensualite, valeurs };
 }
 
-// ---- Envoi des demandes via Meetwave ------------------------------------
-// L'origine du site identifie le client côté Meetwave; source distingue les
+// ---- Envoi des demandes au prestataire technique ------------------------------------
+// L'origine du site identifie le client côté prestataire; source distingue les
 // formulaires contact et prévoyance dans le suivi.
 const endpointLeads = 'https://db-meetwave.stonks.ch/functions/v1/form-submit';
 let turnstileScriptPromise;
