@@ -278,7 +278,7 @@ function calculerProjectionPrevoyance(form) {
 // ---- Envoi des demandes au prestataire technique ------------------------------------
 // L'origine du site identifie le client côté prestataire; source distingue les
 // formulaires contact et prévoyance dans le suivi.
-const endpointLeads = 'https://db-meetwave.stonks.ch/functions/v1/form-submit';
+const endpointLeads = 'https://flint.stonksdev.cloud/functions/v1/form-submit';
 let turnstileScriptPromise;
 function chargerTurnstile(form) {
   const widget = form?.querySelector('[data-turnstile-widget]');
